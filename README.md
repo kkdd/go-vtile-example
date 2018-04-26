@@ -2,6 +2,7 @@
 
 ![](https://cloud.githubusercontent.com/assets/583385/16578797/4cbf4d8a-4251-11e6-9f4c-75820d220405.png)
 
+
 ## Installation
 
 To install, ensure github.com/golang/protobuf/proto is installed and available on your $GOPATH.
@@ -10,15 +11,9 @@ To install, ensure github.com/golang/protobuf/proto is installed and available o
 
 `cd` into the project directory, then run:
 
-    go run main.go
-
-## Docker
-
-To install/run in Docker instead of natively:
-
-```
-docker build -t go-vtile-example .
-docker run -d -p 8080:8080 go-vtile-example
+```console
+$ go run main.go
+number of points = 91586
 ```
 
 ## To view the tiles
