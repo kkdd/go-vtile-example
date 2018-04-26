@@ -7,6 +7,33 @@
 
 To install, ensure github.com/golang/protobuf/proto is installed and available on your $GOPATH.
 
+```console
+$ cd vector_tile
+$ wget https://github.com/mapbox/vector-tile-spec/blob/master/2.1/vector_tile.proto
+$ cat vector_tile.proto.diff
+--- vector_tile.proto.orig
++++ vector_tile.proto
+@@ -1,3 +1,5 @@
++syntax = "proto2";
++
+ package vector_tile;
+ 
+ option optimize_for = LITE_RUNTIME;
+@@ -52,7 +54,7 @@
+                 // number encoded in this message and choose the correct
+                 // implementation for this version number before proceeding to
+                 // decode other parts of this message.
+-                required uint32 version = 15 [ default = 1 ];
++                required uint32 version = 15 [ default = 2 ];
+ 
+                 required string name = 1;
+$
+$ protoc --go_out=. vector_tile.proto
+$ ls -d vector_tile.*
+vector_tile.pb.go	vector_tile.proto
+$
+```
+
 ## To run the project
 
 `cd` into the project directory, then run:
@@ -64,3 +91,8 @@ map.on('load', function loaded() {
 ## Data from SFGov.org
 
 https://data.sfgov.org/City-Infrastructure/Street-Tree-Map/337t-q2b4
+
+```console
+$ ls trees.csv
+trees.csv
+```
