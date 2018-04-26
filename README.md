@@ -43,6 +43,15 @@ $ go run main.go
 number of points = 91586
 ```
 
+In main.go, location is represented as:
+
+```math
+loc.x &= \frac{\lambda}{2 \pi} \\
+loc.y &= \tan \frac{\phi}{2}
+```
+
+
+
 ## To view the tiles
 
 To view the tiles, you'll need to modify your MapboxGL style to add an additional vector tile layer. Here's an example:
