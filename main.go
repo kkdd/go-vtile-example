@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"compress/gzip"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -11,9 +13,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
 	"github.com/golang/protobuf/proto"
-	"github.com/vicapow/go-vtile-example/gen/third-party/vector-tile-spec/1.0.1"
+	"./vector_tile"
 )
 
 func cmdEnc(id uint32, count uint32) uint32 {
@@ -36,47 +37,38 @@ func paramEnc(value int32) int32 {
 	return (value << 1) ^ (value >> 31)
 }
 
-func createTileWithPoints(xyz TileID, points []LngLat) ([]byte, error) {
-	tile := &vector_tile.Tile{}
-	var layerVersion = vector_tile.Default_Tile_Layer_Version
+func createTileWithPoints(points []XY, bounds XYZ) ([]byte, error) {
 	layerName := "points"
+	var layerVersion = vector_tile.Default_Tile_Layer_Version
 	featureType := vector_tile.Tile_POINT
 	var extent = vector_tile.Default_Tile_Layer_Extent
-	// Put a point in the center of the tile.
 	var geometry []uint32
-	var filtered [][2]float64
+	geometry = append(geometry, 0)  // dummy
+	var pX int32
+	var pY int32
+	x, y := tileToBoundingBox(bounds)
 	for _, point := range points {
-		x, y := lngLatToTileXY(point, xyz)
-		if x >= 0 && x < 1 && y >= 0 && y < 1 {
-			filtered = append(filtered, [2]float64{x, y})
-		}
-	}
-	if len(filtered) > 0 {
-		cmd := moveTo(uint32(len(filtered)))
-		geometry = append(geometry, cmd)
-		var pX int32
-		var pY int32
-		for _, point := range filtered {
-			deltaX := int32(float64(extent)*point[0]+0.5) - pX
-			deltaY := int32(float64(extent)*point[1]+0.5) - pY
+		if point.x >= x[0] && point.x < x[1] && point.y >= y[0] && point.y < y[1] {
+			p := locToTileXY(point, bounds)
+			deltaX := int32(float64(extent)*p.x+0.5) - pX
+			deltaY := int32(float64(extent)*p.y+0.5) - pY
 			geometry = append(geometry, uint32(paramEnc(deltaX)))
 			geometry = append(geometry, uint32(paramEnc(deltaY)))
 			pX = pX + deltaX
 			pY = pY + deltaY
 		}
-	} else {
-		// Return an empty tile if we have no points
-		return nil, nil
 	}
+	geometry[0] = moveTo((uint32(len(geometry))-1)/2)
+	tile := &vector_tile.Tile{}
 	tile.Layers = []*vector_tile.Tile_Layer{
 		&vector_tile.Tile_Layer{
 			Version: &layerVersion,
-			Name:    &layerName,
+			Name:	&layerName,
 			Extent:  &extent,
 			Features: []*vector_tile.Tile_Feature{
 				&vector_tile.Tile_Feature{
-					Tags:     []uint32{},
-					Type:     &featureType,
+					Tags:	 []uint32{},
+					Type:	 &featureType,
 					Geometry: geometry,
 				},
 			},
@@ -85,75 +77,114 @@ func createTileWithPoints(xyz TileID, points []LngLat) ([]byte, error) {
 	return proto.Marshal(tile)
 }
 
-func xyzToLngLat(tileX float64, tileY float64, tileZ float64) (float64, float64) {
-	totalTilesX := math.Pow(2, tileZ)
-	totalTilesY := math.Pow(2, tileZ)
-	x := float64(tileX) / float64(totalTilesX)
-	y := float64(tileY) / float64(totalTilesY)
-	// lambda can go from [-pi/2, pi/2]
-	lambda := x*math.Pi*2 - math.Pi
-	// phi can go from [-1.4844, 1.4844]
-	phi := 2*math.Atan(math.Exp((2*y-1)*math.Pi)) - (math.Pi / 2)
-	lng := lambda * 180 / math.Pi
-	lat := (math.Pi - phi) * 180 / math.Pi
-	return lng, lat
+// return loc: Braun projection
+func lonLatToLoc(lonLat XY) (XY) {
+	var loc XY
+	loc.x = lonLat.x/360
+	loc.y = math.Tan(lonLat.y/360 * math.Pi)  // Braun projection
+	return loc
 }
 
-func lngLatToTileXY(ll LngLat, tile TileID) (float64, float64) {
-	totalTilesX := math.Pow(2, float64(tile.z))
-	totalTilesY := math.Pow(2, float64(tile.z))
-	lambda := (ll.lng + 180) / 180 * math.Pi
-	// phi: [-pi/2, pi/2]
-	phi := ll.lat / 180 * math.Pi
-	tileX := lambda / (2 * math.Pi) * totalTilesX
-	// [-1.4844, 1.4844] -> [1, 0]  * totalTilesY
-	tileY := (math.Log(math.Tan(math.Pi/4-phi/2))/math.Pi/2 + 0.5) * totalTilesY
-	return tileX - float64(tile.x), tileY - float64(tile.y)
+func locToLonLat(loc XY) (XY) {
+	var lonLat XY
+	lonLat.x = loc.x * 360
+	lonLat.y = math.Atan(loc.y) * 360/math.Pi  // inverse Braun projection
+	return lonLat
+}
+
+// relative position in a tile
+func locToTileXY(loc XY, tile XYZ) (XY) {
+	pos := loc
+	pos.y = math.Log((1+pos.y)/(1-pos.y))/math.Pi/2  // web mercator
+	pos.x = ( pos.x + 0.5) * tile.z - tile.x
+	pos.y = (-pos.y + 0.5) * tile.z - tile.y
+	return pos
+}
+
+func tileToLoc(tile XYZ) (XY) {
+	var loc XY
+	loc.x =   tile.x / tile.z - 0.5
+	loc.y = -(tile.y / tile.z - 0.5)
+	loc.y = 1 - 2/(math.Exp(loc.y*math.Pi*2)+1)  // inverse web mercator
+	return loc
+}
+
+func tileToBoundingBox(tile XYZ) ([]float64, []float64) {
+	upper := tileToLoc(tile)
+	lower := tileToLoc(XYZ{x: tile.x, y: tile.y+1, z: tile.z})
+	return []float64{upper.x, upper.x + 1/tile.z}, []float64{lower.y, upper.y}
+}
+
+const RE = 6378137.0  // GRS80
+const FE = 1/298.257223563  // IS-GPS
+const E2 = FE * (2 - FE)
+
+//  geographic distance between two points
+//  inputs: p = lonLatToLoc(lonLat1), q = lonLatToLoc(lonLat2)
+func distance(p XY, q XY) (float64) {
+	y2 := square((p.y + q.y) / 2)
+	coslat := (1 - y2) / (1 + y2)
+	w2 := 1 / (1 - E2 * (1 - coslat * coslat))
+	dx := (p.x - q.x) * coslat
+	dy := (p.y - q.y) * 2 / (1 + y2) * w2 * (1 - E2)
+	return math.Sqrt(hypotSquared(dx, dy) * w2) * 2 * math.Pi * RE
+}
+
+func square(x float64) (float64) {
+	return x * x
+}
+
+func hypotSquared(x float64, y float64) (float64) {
+	return x * x + y * y
 }
 
 // Takes a string of the form `<z>/<x>/<y>` (for example, 1/2/3) and returns
 // the individual uint32 values for x, y, and z if there was no error.
 // Otherwise, err is set to a non `nil` value and x, y, z are set to 0.
-func tilePathToXYZ(path string) (TileID, error) {
+func pathToTile(path string) (XYZ, error) {
 	xyzReg := regexp.MustCompile("(?P<z>[0-9]+)/(?P<x>[0-9]+)/(?P<y>[0-9]+)")
 	matches := xyzReg.FindStringSubmatch(path)
 	if len(matches) == 0 {
-		return TileID{}, errors.New("Unable to parse path as tile")
+		return XYZ{}, errors.New("Unable to parse path as tile")
 	}
 	x, err := strconv.ParseUint(matches[2], 10, 32)
 	if err != nil {
-		return TileID{}, err
+		return XYZ{}, err
 	}
 	y, err := strconv.ParseUint(matches[3], 10, 32)
 	if err != nil {
-		return TileID{}, err
+		return XYZ{}, err
 	}
 	z, err := strconv.ParseUint(matches[1], 10, 32)
 	if err != nil {
-		return TileID{}, err
+		return XYZ{}, err
 	}
-	return TileID{x: uint32(x), y: uint32(y), z: uint32(z)}, nil
+	return XYZ{x: float64(x), y: float64(y), z: math.Pow(2, float64(z))}, nil
 }
 
-// A LngLat is a struct that holds a longitude and latitude vale.
-type LngLat struct {
-	lng float64
-	lat float64
+// A XYZ is a struct that holds tile's coordinates and zoom scale.
+type XYZ struct {
+	x float64
+	y float64
+	z float64
 }
 
-// TileID represents the id of the tile.
-type TileID struct {
-	x uint32
-	y uint32
-	z uint32
+// A XY is a struct that holds a geographic location.
+type XY struct {
+	x float64
+	y float64
 }
 
 // Tree a struct holder for tree information.
 type Tree struct {
-	lng     float64
-	lat     float64
+	lonlat XY
 	species string
 }
+
+// trees.csv: TreeID,qLegalStatus,qSpecies,qAddress,SiteOrder,qSiteInfo,PlantType,qCaretaker,qCareAssistant,PlantDate,DBH,PlotSize,PermitNotes,XCoord,YCoord,Latitude,Longitude,Location
+const SPECIES = 2
+const LATITUDE = 15
+const LONGITUDE = 16
 
 func loadTrees() []Tree {
 	content, err := ioutil.ReadFile("./trees.csv")
@@ -165,39 +196,35 @@ func loadTrees() []Tree {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// TreeID,qLegalStatus,qSpecies,qAddress,SiteOrder,qSiteInfo,PlantType,qCaretaker,qCareAssistant,PlantDate,DBH,PlotSize,PermitNotes,XCoord,YCoord,Latitude,Longitude,Location
 	var trees []Tree
 	for _, record := range records[1:] {
-		lat, _ := strconv.ParseFloat(record[15], 64)
-		lng, _ := strconv.ParseFloat(record[16], 64)
-		species := record[2]
-		trees = append(trees, Tree{lng: lng, lat: lat, species: species})
+		species := record[SPECIES]
+		lon, _ := strconv.ParseFloat(record[LONGITUDE], 64)
+		lat, _ := strconv.ParseFloat(record[LATITUDE], 64)
+		trees = append(trees, Tree{lonlat: XY{x: lon, y: lat}, species: species})
 	}
 	return trees
 }
 
 func main() {
 	trees := loadTrees()
-	points := make([]LngLat, len(trees), len(trees))
+	points := make([]XY, len(trees), len(trees))
 	for i, tree := range trees {
-		points[i] = LngLat{lng: tree.lng, lat: tree.lat}
+		points[i] = lonLatToLoc(tree.lonlat)
 	}
-	// points = points[0:1000]
-	fmt.Println("number of points", len(points))
+	fmt.Println("number of points =", len(points))
 	mux := http.NewServeMux()
-
 	// Handle requests for urls of the form `/tiles/{z}/{x}/{y}` and returns
 	// the vector tile for the even tile x, y, and z coordinates.
 	tileBase := "/tiles/"
 	mux.HandleFunc(tileBase, func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("url: %s", r.URL.Path)
-		tilePart := r.URL.Path[len(tileBase):]
-		xyz, err := tilePathToXYZ(tilePart)
+		tile, err := pathToTile(r.URL.Path[len(tileBase):])
 		if err != nil {
 			http.Error(w, "Invalid tile url", 400)
 			return
 		}
-		data, err := createTileWithPoints(xyz, points)
+		data, err := createTileWithPoints(points, tile)
 		if err != nil {
 			log.Fatal("error generating tile", err)
 		}
