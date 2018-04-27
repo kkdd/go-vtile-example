@@ -99,9 +99,9 @@ map.on('load', function loaded() {
 
 ## Data from SFGov.org
 
-https://data.sfgov.org/City-Infrastructure/Street-Tree-Map/337t-q2b4
+"[Street Tree Map | DataSF | City and County of San Francisco](https://data.sfgov.org/City-Infrastructure/Street-Tree-Map/337t-q2b4)"
 
 ```console
-$ ls trees.csv
-trees.csv
+$ wc -l trees.csv 
+   91587
 ```
