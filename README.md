@@ -7,6 +7,8 @@
 
 To install, ensure github.com/golang/protobuf/proto is installed and available on your $GOPATH.
 
+```vector_tile/vector_tile.pb.go``` is produced as follows:
+
 ```console
 $ cd vector_tile
 $ wget https://github.com/mapbox/vector-tile-spec/blob/master/2.1/vector_tile.proto
