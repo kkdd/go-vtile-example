@@ -5,7 +5,7 @@
 
 ## Installation
 
-To install, ensure github.com/golang/protobuf/proto is installed and available on your $GOPATH.
+```github.com/golang/protobuf/proto`` is required to run (see ```main.go```).
 
 ```vector_tile/vector_tile.pb.go``` is produced as follows:
 
