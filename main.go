@@ -58,7 +58,8 @@ func createTileWithPoints(points []XY, bounds XYZ) ([]byte, error) {
 			pY = pY + deltaY
 		}
 	}
-	geometry[0] = moveTo((uint32(len(geometry))-1)/2)
+	npoints := (uint32(len(geometry))-1)/2
+	geometry[0] = moveTo(npoints)
 	tile := &vector_tile.Tile{}
 	tile.Layers = []*vector_tile.Tile_Layer{
 		&vector_tile.Tile_Layer{
